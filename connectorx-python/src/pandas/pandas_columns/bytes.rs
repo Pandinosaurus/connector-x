@@ -3,8 +3,8 @@ use crate::errors::ConnectorXPythonError;
 use anyhow::anyhow;
 use fehler::throws;
 use ndarray::{ArrayViewMut2, Axis, Ix2};
-use numpy::{npyffi::NPY_TYPES, Element, PyArray, PyArrayDescr};
-use pyo3::{FromPyObject, Py, PyAny, PyResult, Python};
+use numpy::{Element, PyArray, PyArrayDescr};
+use pyo3::{Bound, FromPyObject, Py, PyAny, PyResult, Python};
 use std::any::TypeId;
 
 #[derive(Clone)]
@@ -12,10 +12,14 @@ use std::any::TypeId;
 pub struct PyBytes(Py<pyo3::types::PyBytes>);
 
 // In order to put it into a numpy array
-impl Element for PyBytes {
-    const DATA_TYPE: numpy::DataType = numpy::DataType::Object;
-    fn is_same_type(dtype: &PyArrayDescr) -> bool {
-        unsafe { *dtype.as_dtype_ptr() }.type_num == NPY_TYPES::NPY_OBJECT as i32
+unsafe impl Element for PyBytes {
+    const IS_COPY: bool = false;
+    fn get_dtype_bound(py: Python<'_>) -> Bound<'_, PyArrayDescr> {
+        PyArrayDescr::object_bound(py)
+    }
+
+    fn clone_ref(&self, _py: Python<'_>) -> Self {
+        Self(self.0.clone())
     }
 }
 
@@ -33,6 +37,10 @@ impl<'a> FromPyObject<'a> for BytesBlock<'a> {
             data,
             buf_size_mb: 16, // in MB
         })
+    }
+
+    fn extract_bound(ob: &pyo3::Bound<'a, PyAny>) -> PyResult<Self> {
+        Self::extract(ob.clone().into_gil_ref())
     }
 }
 
@@ -180,9 +188,7 @@ impl BytesColumn {
         let nstrings = self.bytes_lengths.len();
 
         if nstrings > 0 {
-            let py = unsafe { Python::assume_gil_acquired() };
-
-            {
+            Python::with_gil(|py| -> Result<(), ConnectorXPythonError> {
                 // allocation in python is not thread safe
                 let _guard = GIL_MUTEX
                     .lock()
@@ -193,9 +199,10 @@ impl BytesColumn {
                         let end = start + len;
                         unsafe {
                             // allocate and write in the same time
-                            *self.data.add(self.row_idx[i]) = PyBytes(
-                                pyo3::types::PyBytes::new(py, &self.bytes_buf[start..end]).into(),
-                            );
+                            let b =
+                                pyo3::types::PyBytes::new_bound(py, &self.bytes_buf[start..end])
+                                    .unbind();
+                            *self.data.add(self.row_idx[i]) = PyBytes(b);
                         };
                         start = end;
                     } else {
@@ -205,7 +212,8 @@ impl BytesColumn {
                         }
                     }
                 }
-            }
+                Ok(())
+            })?;
 
             self.bytes_buf.truncate(0);
             self.bytes_lengths.truncate(0);

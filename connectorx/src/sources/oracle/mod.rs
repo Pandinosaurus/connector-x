@@ -1,6 +1,8 @@
 mod errors;
 mod typesystem;
 
+use std::collections::HashMap;
+
 pub use self::errors::OracleSourceError;
 pub use self::typesystem::OracleTypeSystem;
 use crate::constants::{DB_BUFFER_SIZE, ORACLE_ARRAY_SIZE};
@@ -34,14 +36,11 @@ pub struct OracleDialect {}
 // implementation copy from AnsiDialect
 impl Dialect for OracleDialect {
     fn is_identifier_start(&self, ch: char) -> bool {
-        ('a'..='z').contains(&ch) || ('A'..='Z').contains(&ch)
+        ch.is_ascii_lowercase() || ch.is_ascii_uppercase()
     }
 
     fn is_identifier_part(&self, ch: char) -> bool {
-        ('a'..='z').contains(&ch)
-            || ('A'..='Z').contains(&ch)
-            || ('0'..='9').contains(&ch)
-            || ch == '_'
+        ch.is_ascii_lowercase() || ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_'
     }
 }
 
@@ -58,12 +57,19 @@ pub fn connect_oracle(conn: &Url) -> Connector {
     let user = decode(conn.username())?.into_owned();
     let password = decode(conn.password().unwrap_or(""))?.into_owned();
     let host = decode(conn.host_str().unwrap_or("localhost"))?.into_owned();
-    let port = conn.port().unwrap_or(1521);
-    let path = decode(conn.path())?.into_owned();
 
-    let conn_str = format!("//{}:{}{}", host, port, path);
+    let params: HashMap<String, String> = conn.query_pairs().into_owned().collect();
+
+    let conn_str = if params.get("alias").map_or(false, |v| v == "true") {
+        host.clone()
+    } else {
+        let port = conn.port().unwrap_or(1521);
+        let path = decode(conn.path())?.into_owned();
+        format!("//{}:{}{}", host, port, path)
+    };
+
     let mut connector = oracle::Connector::new(user.as_str(), password.as_str(), conn_str.as_str());
-    if user.is_empty() && password.is_empty() && host == "localhost" {
+    if user.is_empty() && password.is_empty() {
         debug!("No username or password provided, assuming system auth.");
         connector.external_auth(true);
     }
@@ -264,7 +270,7 @@ impl<'a> OracleTextSourceParser<'a> {
             .build()?;
         let rows: OwningHandle<Box<Statement<'a>>, DummyBox<ResultSet<'a, Row>>> =
             OwningHandle::new_with_fn(Box::new(stmt), |stmt: *const Statement<'a>| unsafe {
-                DummyBox((&mut *(stmt as *mut Statement<'_>)).query(&[]).unwrap())
+                DummyBox((*(stmt as *mut Statement<'_>)).query(&[]).unwrap())
             });
 
         Self {

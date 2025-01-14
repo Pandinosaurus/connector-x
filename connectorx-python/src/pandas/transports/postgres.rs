@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 pub struct PostgresPandasTransport<'py, P, C>(&'py (), PhantomData<P>, PhantomData<C>);
 
 macro_rules! impl_postgres_transport {
@@ -33,6 +34,7 @@ macro_rules! impl_postgres_transport {
                 { Int2[i16]                                     => I64[i64]                 | conversion auto }
                 { Int4[i32]                                     => I64[i64]                 | conversion auto }
                 { Int8[i64]                                     => I64[i64]                 | conversion auto }
+                { BoolArray[Vec<bool>]                          => BoolArray[Vec<bool>]     | conversion auto_vec }
                 { Int2Array[Vec<i16>]                           => I64Array[Vec<i64>]       | conversion auto_vec }
                 { Int4Array[Vec<i32>]                           => I64Array[Vec<i64>]       | conversion auto_vec }
                 { Int8Array[Vec<i64>]                           => I64Array[Vec<i64>]       | conversion auto }
@@ -44,6 +46,7 @@ macro_rules! impl_postgres_transport {
                 { Text[&'r str]                                 => Str[&'r str]             | conversion auto }
                 { BpChar[&'r str]                               => Str[&'r str]             | conversion none }
                 { VarChar[&'r str]                              => Str[&'r str]             | conversion none }
+                { Name[&'r str]                                 => Str[&'r str]             | conversion none }
                 { Timestamp[NaiveDateTime]                      => DateTime[DateTime<Utc>]  | conversion option }
                 { TimestampTz[DateTime<Utc>]                    => DateTime[DateTime<Utc>]  | conversion auto }
                 { Date[NaiveDate]                               => DateTime[DateTime<Utc>]  | conversion option }
@@ -110,13 +113,17 @@ impl<'py, P, C> TypeConversion<NaiveDateTime, DateTime<Utc>>
     for PostgresPandasTransport<'py, P, C>
 {
     fn convert(val: NaiveDateTime) -> DateTime<Utc> {
-        DateTime::from_utc(val, Utc)
+        DateTime::from_naive_utc_and_offset(val, Utc)
     }
 }
 
 impl<'py, P, C> TypeConversion<NaiveDate, DateTime<Utc>> for PostgresPandasTransport<'py, P, C> {
     fn convert(val: NaiveDate) -> DateTime<Utc> {
-        DateTime::from_utc(val.and_hms(0, 0, 0), Utc)
+        DateTime::from_naive_utc_and_offset(
+            val.and_hms_opt(0, 0, 0)
+                .unwrap_or_else(|| panic!("and_hms_opt got None from {:?}", val)),
+            Utc,
+        )
     }
 }
 

@@ -22,8 +22,8 @@ impl<'a> FromPyObject<'a> for BooleanBlock<'a> {
         } else {
             // if extension array
             let tuple = ob.downcast::<PyTuple>()?;
-            let data = tuple.get_item(0);
-            let mask = tuple.get_item(1);
+            let data = tuple.get_item(0)?;
+            let mask = tuple.get_item(1)?;
             check_dtype(data, "bool")?;
             check_dtype(mask, "bool")?;
 
@@ -32,6 +32,10 @@ impl<'a> FromPyObject<'a> for BooleanBlock<'a> {
                 unsafe { mask.downcast::<PyArray1<bool>>()?.as_array_mut() },
             ))
         }
+    }
+
+    fn extract_bound(ob: &pyo3::Bound<'a, PyAny>) -> PyResult<Self> {
+        Self::extract(ob.clone().into_gil_ref())
     }
 }
 

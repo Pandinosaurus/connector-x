@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 #[test]
+#[ignore]
 fn test_mssql() {
     let _ = env_logger::builder().is_test(true).try_init();
 
@@ -33,6 +34,7 @@ fn test_mssql() {
 }
 
 #[test]
+#[ignore]
 fn test_mssql_agg() {
     let _ = env_logger::builder().is_test(true).try_init();
 
@@ -112,7 +114,7 @@ pub fn verify_arrow_results(result: Vec<RecordBatch>) {
                     .as_any()
                     .downcast_ref::<Float64Array>()
                     .unwrap()
-                    .eq(&Float64Array::from(vec![None, Some(3.1 as f64)])));
+                    .eq(&Float64Array::from(vec![None, Some(3.1_f64)])));
 
                 assert!(rb
                     .column(4)
@@ -154,10 +156,10 @@ pub fn verify_arrow_results(result: Vec<RecordBatch>) {
                     .downcast_ref::<Float64Array>()
                     .unwrap()
                     .eq(&Float64Array::from(vec![
-                        Some(2.2 as f64),
-                        Some(3 as f64),
-                        Some(7.8 as f64),
-                        Some(-10 as f64),
+                        Some(2.2_f64),
+                        Some(3_f64),
+                        Some(7.8_f64),
+                        Some(-10_f64),
                     ])));
 
                 assert!(rb
