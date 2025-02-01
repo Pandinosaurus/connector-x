@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-from .. import read_sql
+from .. import read_sql, ConnectionUrl
 
 
 @pytest.fixture(scope="module")  # type: ignore
@@ -16,7 +16,7 @@ def oracle_url() -> str:
 @pytest.mark.skipif(
     not os.environ.get("ORACLE_URL"), reason="Test oracle only when `ORACLE_URL` is set"
 )
-def test_on_non_select(oracle_url: str) -> None:
+def test_oracle_on_non_select(oracle_url: str) -> None:
     query = "CREATE TABLE non_select(id INTEGER NOT NULL)"
     read_sql(oracle_url, query)
 
@@ -441,3 +441,10 @@ def test_oracle_round_function(oracle_url: str) -> None:
         }
     )
     assert_frame_equal(df, expected, check_names=True)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ORACLE_URL"), reason="Test oracle only when `ORACLE_URL` is set"
+)
+def test_connection_url(oracle_url: str) -> None:
+    test_oracle_round_function(ConnectionUrl(oracle_url))
