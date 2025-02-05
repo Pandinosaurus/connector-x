@@ -1,10 +1,10 @@
-#[cfg(any(feature = "dst_arrow", feature = "dst_arrow2"))]
+#[cfg(feature = "dst_arrow")]
 pub(crate) const SECONDS_IN_DAY: i64 = 86_400;
 
 #[allow(dead_code)]
 const KILO: usize = 1 << 10;
 
-#[cfg(any(feature = "dst_arrow", feature = "dst_arrow2"))]
+#[cfg(feature = "dst_arrow")]
 pub const RECORD_BATCH_SIZE: usize = 64 * KILO;
 
 #[cfg(any(
@@ -16,7 +16,7 @@ pub const RECORD_BATCH_SIZE: usize = 64 * KILO;
 pub const DB_BUFFER_SIZE: usize = 32;
 
 #[cfg(any(feature = "src_oracle"))]
-pub const ORACLE_ARRAY_SIZE: u32 = (1 * KILO) as u32;
+pub const ORACLE_ARRAY_SIZE: u32 = KILO as u32;
 
 #[cfg(all(not(debug_assertions), feature = "federation"))]
 pub const J4RS_BASE_PATH: &str = "../target/release";

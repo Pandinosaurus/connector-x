@@ -1,12 +1,13 @@
 mod plan;
 
-use arrow::ffi::{ArrowArray, FFI_ArrowArray, FFI_ArrowSchema};
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use connectorx::prelude::*;
 use libc::c_char;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
 use std::ffi::{CStr, CString};
+use std::sync::Arc;
 
 #[repr(C)]
 pub struct CXSlice<T> {
@@ -43,6 +44,8 @@ pub struct CXConnectionInfo {
     conn: *const c_char,
     schema: CXSlice<CXTable>,
     is_local: bool,
+    jdbc_url: *const c_char,
+    jdbc_driver: *const c_char,
 }
 
 #[repr(C)]
@@ -68,6 +71,7 @@ pub unsafe extern "C" fn free_plans(res: *const CXSlice<CXFederatedPlan>) {
 pub unsafe extern "C" fn connectorx_rewrite(
     conn_list: *const CXSlice<CXConnectionInfo>,
     query: *const c_char,
+    strategy: *const c_char,
 ) -> CXSlice<CXFederatedPlan> {
     let mut db_map = HashMap::new();
     let conn_slice = unsafe { std::slice::from_raw_parts((*conn_list).ptr, (*conn_list).len) };
@@ -94,26 +98,38 @@ pub unsafe extern "C" fn connectorx_rewrite(
             db_map.insert(name.to_string(), source_info);
         } else {
             let conn = unsafe { CStr::from_ptr(p.conn) }.to_str().unwrap();
+            let jdbc_url = match p.jdbc_url.is_null() {
+                true => "",
+                false => unsafe { CStr::from_ptr(p.jdbc_url) }.to_str().unwrap(),
+            };
+            let jdbc_driver = match p.jdbc_driver.is_null() {
+                true => "",
+                false => unsafe { CStr::from_ptr(p.jdbc_driver) }.to_str().unwrap(),
+            };
             // println!("name: {:?}, conn: {:?}", name, conn);
             let source_info = FederatedDataSourceInfo::new_from_conn_str(
                 SourceConn::try_from(conn).unwrap(),
                 p.is_local,
+                jdbc_url,
+                jdbc_driver,
             );
             db_map.insert(name.to_string(), source_info);
         }
     }
 
     let query_str = unsafe { CStr::from_ptr(query) }.to_str().unwrap();
+    let strategy_str = unsafe { CStr::from_ptr(strategy) }.to_str().unwrap();
     let j4rs_base = match env::var("CX_LIB_PATH") {
         Ok(val) => Some(val),
         Err(_) => None,
     };
     // println!("j4rs_base: {:?}", j4rs_base);
-    let fed_plan: Vec<CXFederatedPlan> = rewrite_sql(query_str, &db_map, j4rs_base.as_deref())
-        .unwrap()
-        .into_iter()
-        .map(|p| p.into())
-        .collect();
+    let fed_plan: Vec<CXFederatedPlan> =
+        rewrite_sql(query_str, &db_map, j4rs_base.as_deref(), strategy_str)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
 
     CXSlice::<_>::new_from_vec(fed_plan)
 }
@@ -160,7 +176,7 @@ pub unsafe extern "C" fn connectorx_scan(conn: *const c_char, query: *const c_ch
     let conn_str = unsafe { CStr::from_ptr(conn) }.to_str().unwrap();
     let query_str = unsafe { CStr::from_ptr(query) }.to_str().unwrap();
     let source_conn = SourceConn::try_from(conn_str).unwrap();
-    let record_batches = get_arrow(&source_conn, None, &[CXQuery::from(query_str)])
+    let record_batches = get_arrow(&source_conn, None, &[CXQuery::from(query_str)], None)
         .unwrap()
         .arrow()
         .unwrap();
@@ -183,9 +199,13 @@ pub unsafe extern "C" fn connectorx_scan(conn: *const c_char, query: *const c_ch
         let mut cols = vec![];
 
         for array in rb.columns() {
-            let data = array.data().clone();
-            let array = ArrowArray::try_new(data).expect("c ptr");
-            let (array_ptr, schema_ptr) = ArrowArray::into_raw(array);
+            let data = array.to_data();
+            let array = Arc::new(FFI_ArrowArray::new(&data));
+            let schema = Arc::new(
+                arrow::ffi::FFI_ArrowSchema::try_from(data.data_type()).expect("export schema c"),
+            );
+            let array_ptr = Arc::into_raw(array);
+            let schema_ptr = Arc::into_raw(schema);
 
             let cx_array = CXArray {
                 array: array_ptr,
@@ -261,7 +281,7 @@ pub unsafe extern "C" fn connectorx_scan_iter(
     }
 
     let arrow_iter: Box<dyn RecordBatchIterator> =
-        new_record_batch_iter(&source_conn, None, query_vec.as_slice(), batch_size);
+        new_record_batch_iter(&source_conn, None, query_vec.as_slice(), batch_size, None);
 
     Box::into_raw(Box::new(arrow_iter))
 }
@@ -274,9 +294,13 @@ pub unsafe extern "C" fn connectorx_get_schema(
     let (empty_batch, names) = arrow_iter.get_schema();
     let mut cols = vec![];
     for array in empty_batch.columns() {
-        let data = array.data().clone();
-        let array = ArrowArray::try_new(data).expect("c ptr");
-        let (array_ptr, schema_ptr) = ArrowArray::into_raw(array);
+        let data = array.to_data();
+        let array = Arc::new(arrow::ffi::FFI_ArrowArray::new(&data));
+        let schema = Arc::new(
+            arrow::ffi::FFI_ArrowSchema::try_from(data.data_type()).expect("export schema c"),
+        );
+        let array_ptr = Arc::into_raw(array);
+        let schema_ptr = Arc::into_raw(schema);
         let cx_array = CXArray {
             array: array_ptr,
             schema: schema_ptr,
@@ -317,9 +341,12 @@ pub unsafe extern "C" fn connectorx_iter_next(
             let mut cols = vec![];
 
             for array in rb.columns() {
-                let data = array.data().clone();
-                let array = ArrowArray::try_new(data).expect("c ptr");
-                let (array_ptr, schema_ptr) = ArrowArray::into_raw(array);
+                let data = array.to_data();
+                let array = Arc::new(arrow::ffi::FFI_ArrowArray::new(&data));
+                let schema =
+                    Arc::new(FFI_ArrowSchema::try_from(data.data_type()).expect("export schema c"));
+                let array_ptr = Arc::into_raw(array);
+                let schema_ptr = Arc::into_raw(schema);
 
                 let cx_array = CXArray {
                     array: array_ptr,
@@ -333,4 +360,9 @@ pub unsafe extern "C" fn connectorx_iter_next(
         }
         None => std::ptr::null_mut(),
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn connectorx_set_thread_num(num: usize) {
+    set_global_num_thread(num);
 }

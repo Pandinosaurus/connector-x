@@ -36,11 +36,11 @@ impl Dialect for BigQueryDialect {
     }
 
     fn is_identifier_start(&self, ch: char) -> bool {
-        ('a'..='z').contains(&ch) || ('A'..='Z').contains(&ch) || ch == '_' || ch == '-'
+        ch.is_ascii_lowercase() || ch.is_ascii_uppercase() || ch == '_' || ch == '-'
     }
 
     fn is_identifier_part(&self, ch: char) -> bool {
-        self.is_identifier_start(ch) || ('0'..='9').contains(&ch)
+        self.is_identifier_start(ch) || ch.is_ascii_digit()
     }
 }
 
@@ -232,7 +232,7 @@ impl SourcePartition for BigQuerySourcePartition {
     }
 
     #[throws(BigQuerySourceError)]
-    fn parser<'a>(&'a mut self) -> Self::Parser<'a> {
+    fn parser(&mut self) -> Self::Parser<'_> {
         let job = self.client.job();
         let qry = self.rt.block_on(job.query(
             self.project_id.as_str(),
@@ -1059,7 +1059,8 @@ impl<'r, 'a> Produce<'r, DateTime<Utc>> for BigQuerySourceParser {
             * 1e9) as i64;
         let secs = timestamp_ns / 1000000000;
         let nsecs = (timestamp_ns % 1000000000) as u32;
-        DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(secs, nsecs), Utc)
+        DateTime::from_timestamp(secs, nsecs)
+            .unwrap_or_else(|| panic!("out of range number: {} {}", secs, nsecs))
     }
 }
 
@@ -1132,10 +1133,7 @@ impl<'r, 'a> Produce<'r, Option<DateTime<Utc>>> for BigQuerySourceParser {
                     * 1e9) as i64;
                 let secs = timestamp_ns / 1000000000;
                 let nsecs = (timestamp_ns % 1000000000) as u32;
-                Some(DateTime::<Utc>::from_utc(
-                    NaiveDateTime::from_timestamp(secs, nsecs),
-                    Utc,
-                ))
+                DateTime::from_timestamp(secs, nsecs)
             }
         }
     }

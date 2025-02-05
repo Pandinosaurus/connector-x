@@ -17,6 +17,8 @@ pub mod oracle;
 pub mod postgres;
 #[cfg(feature = "src_sqlite")]
 pub mod sqlite;
+#[cfg(feature = "src_trino")]
+pub mod trino;
 
 use crate::data_order::DataOrder;
 use crate::errors::ConnectorXError;
@@ -38,6 +40,10 @@ pub trait Source {
     fn set_queries<Q: ToString>(&mut self, queries: &[CXQuery<Q>]);
 
     fn set_origin_query(&mut self, query: Option<String>);
+
+    fn set_pre_execution_queries(&mut self, _pre_execution_queries: Option<&[String]>) {
+        unimplemented!("pre_execution_queries is not implemented in this source type");
+    }
 
     fn fetch_metadata(&mut self) -> Result<(), Self::Error>;
     /// Get total number of rows if available

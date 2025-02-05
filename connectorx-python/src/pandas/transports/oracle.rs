@@ -8,6 +8,7 @@ use connectorx::{
     typesystem::TypeConversion,
 };
 
+#[allow(dead_code)]
 pub struct OraclePandasTransport<'py>(&'py ());
 
 impl_transport!(
@@ -35,6 +36,6 @@ impl_transport!(
 
 impl<'py> TypeConversion<NaiveDateTime, DateTime<Utc>> for OraclePandasTransport<'py> {
     fn convert(val: NaiveDateTime) -> DateTime<Utc> {
-        DateTime::from_utc(val, Utc)
+        DateTime::from_naive_utc_and_offset(val, Utc)
     }
 }
